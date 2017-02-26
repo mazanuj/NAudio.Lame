@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NAudio.Lame", "NAudio.Lame.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestConsole", "TestConsole\TestConsole.csproj", "{872DF592-2993-4985-ABCE-996875046A3B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestDll", "TestDll\TestDll.csproj", "{B667DA94-DC2F-4930-A812-A136937BA3F1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{872DF592-2993-4985-ABCE-996875046A3B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{872DF592-2993-4985-ABCE-996875046A3B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{872DF592-2993-4985-ABCE-996875046A3B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B667DA94-DC2F-4930-A812-A136937BA3F1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B667DA94-DC2F-4930-A812-A136937BA3F1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B667DA94-DC2F-4930-A812-A136937BA3F1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B667DA94-DC2F-4930-A812-A136937BA3F1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
