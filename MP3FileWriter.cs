@@ -32,682 +32,734 @@ using System.Collections.Generic;
 
 namespace NAudio.Lame
 {
-	/// <summary>LAME encoding presets</summary>
-	public enum LAMEPreset : int
-	{
-		/*values from 8 to 320 should be reserved for abr bitrates*/
-		/*for abr I'd suggest to directly use the targeted bitrate as a value*/
-
-		/// <summary>8-kbit ABR</summary>
-		ABR_8 = 8,
-		/// <summary>16-kbit ABR</summary>
-		ABR_16 = 16,
-		/// <summary>32-kbit ABR</summary>
-		ABR_32 = 32,
-		/// <summary>48-kbit ABR</summary>
-		ABR_48 = 48,
-		/// <summary>64-kbit ABR</summary>
-		ABR_64 = 64,
-		/// <summary>96-kbit ABR</summary>
-		ABR_96 = 96,
-		/// <summary>128-kbit ABR</summary>
-		ABR_128 = 128,
-		/// <summary>160-kbit ABR</summary>
-		ABR_160 = 160,
-		/// <summary>256-kbit ABR</summary>
-		ABR_256 = 256,
-		/// <summary>320-kbit ABR</summary>
-		ABR_320 = 320,
-
-		/*Vx to match Lame and VBR_xx to match FhG*/
-		/// <summary>VBR Quality 9</summary>
-		V9 = 410,
-		/// <summary>FhG: VBR Q10</summary>
-		VBR_10 = 410,
-		/// <summary>VBR Quality 8</summary>
-		V8 = 420,
-		/// <summary>FhG: VBR Q20</summary>
-		VBR_20 = 420,
-		/// <summary>VBR Quality 7</summary>
-		V7 = 430,
-		/// <summary>FhG: VBR Q30</summary>
-		VBR_30 = 430,
-		/// <summary>VBR Quality 6</summary>
-		V6 = 440,
-		/// <summary>FhG: VBR Q40</summary>
-		VBR_40 = 440,
-		/// <summary>VBR Quality 5</summary>
-		V5 = 450,
-		/// <summary>FhG: VBR Q50</summary>
-		VBR_50 = 450,
-		/// <summary>VBR Quality 4</summary>
-		V4 = 460,
-		/// <summary>FhG: VBR Q60</summary>
-		VBR_60 = 460,
-		/// <summary>VBR Quality 3</summary>
-		V3 = 470,
-		/// <summary>FhG: VBR Q70</summary>
-		VBR_70 = 470,
-		/// <summary>VBR Quality 2</summary>
-		V2 = 480,
-		/// <summary>FhG: VBR Q80</summary>
-		VBR_80 = 480,
-		/// <summary>VBR Quality 1</summary>
-		V1 = 490,
-		/// <summary>FhG: VBR Q90</summary>
-		VBR_90 = 490,
-		/// <summary>VBR Quality 0</summary>
-		V0 = 500,
-		/// <summary>FhG: VBR Q100</summary>
-		VBR_100 = 500,
-
-		/*still there for compatibility*/
-		/// <summary>R3Mix quality - </summary>
-		R3MIX = 1000,
-		/// <summary>Standard Quality</summary>
-		STANDARD = 1001,
-		/// <summary>Extreme Quality</summary>
-		EXTREME = 1002,
-		/// <summary>Insane Quality</summary>
-		INSANE = 1003,
-		/// <summary>Fast Standard Quality</summary>
-		STANDARD_FAST = 1004,
-		/// <summary>Fast Extreme Quality</summary>
-		EXTREME_FAST = 1005,
-		/// <summary>Medium Quality</summary>
-		MEDIUM = 1006,
-		/// <summary>Fast Medium Quality</summary>
-		MEDIUM_FAST = 1007
-	}
-
-	/// <summary>Delegate for receiving output messages</summary>
-	/// <param name="text">Text to output</param>
-	/// <remarks>Output from the LAME library is very limited.  At this stage only a few direct calls will result in output. No output is normally generated during encoding.</remarks>
-	public delegate void OutputHandler(string text);
-
-	/// <summary>Delegate for progress feedback from encoder</summary>
-	/// <param name="writer"><see cref="LameMP3FileWriter"/> instance that the progress update is for</param>
-	/// <param name="inputBytes">Total number of bytes passed to encoder</param>
-	/// <param name="outputBytes">Total number of bytes written to output</param>
-	/// <param name="finished">True if encoding process is completed</param>
-	public delegate void ProgressHandler(object writer, long inputBytes, long outputBytes, bool finished);
-
-	/// <summary>MP3 encoding class, uses libmp3lame DLL to encode.</summary>
-	public class LameMP3FileWriter : Stream
-	{
-		/// <summary>Static initializer, ensures that the correct library is loaded</summary>
-		static LameMP3FileWriter()
-		{
-			Loader.Init();
-		}
-
-		// Ensure that the Loader is initialized correctly
-		//static bool init_loader = Loader.Initialized;
-
-		/// <summary>Union class for fast buffer conversion</summary>
-		/// <remarks>
-		/// <para>
-		/// Because of the way arrays work in .NET, all of the arrays will have the same
-		/// length value.  To prevent unaware code from trying to read/write from out of
-		/// bounds, allocation is done at the grain of the Least Common Multiple of the
-		/// sizes of the contained types.  In this case the LCM is 8 bytes - the size of
-		/// a double or a long - which simplifies allocation.
-		/// </para><para>
-		/// This means that when you ask for an array of 500 bytes you will actually get 
-		/// an array of 63 doubles - 504 bytes total.  Any code that uses the length of 
-		/// the array will see only 63 bytes, shorts, etc.
-		/// </para><para>
-		/// CodeAnalysis does not like this class, with good reason.  It should never be
-		/// exposed beyond the scope of the MP3FileWriter.
-		/// </para>
-		/// </remarks>
-		// uncomment to suppress CodeAnalysis warnings for the ArrayUnion class:
-		[System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Portability", "CA1900:ValueTypeFieldsShouldBePortable", Justification = "This design breaks portability, but is never exposed outside the class.  Tested on x86 and x64 architectures.")]
-		[StructLayout(LayoutKind.Explicit)]
-		private class ArrayUnion
-		{
-			/// <summary>Length of the byte array</summary>
-			[FieldOffset(0)]
-			public readonly int nBytes;
-
-			/// <summary>Array of unsigned 8-bit integer values, length will be misreported</summary>
-			[FieldOffset(16)]
-			public readonly byte[] bytes;
-
-			/// <summary>Array of signed 16-bit integer values, length will be misreported</summary>
-			[FieldOffset(16)]
-			public readonly short[] shorts;
-
-			/// <summary>Array of signed 32-bit integer values, length will be misreported</summary>
-			[FieldOffset(16)]
-			public readonly int[] ints;
-
-			/// <summary>Array of signed 64-bit integer values, length will be correct</summary>
-			[FieldOffset(16)]
-			public readonly long[] longs;
-
-			/// <summary>Array of signed 32-bit floating point values, length will be misreported</summary>
-			[FieldOffset(16)]
-			public readonly float[] floats;
-
-			/// <summary>Array of signed 64-bit floating point values, length will be correct</summary>
-			/// <remarks>This is the actual array allocated by the constructor</remarks>
-			[FieldOffset(16)]
-			public readonly double[] doubles;
-
-			// True sizes of the various array types, calculated from number of bytes
-
-			/// <summary>Actual length of the 'shorts' member array</summary>
-			public int nShorts { get { return nBytes / 2; } }
-			/// <summary>Actual length of the 'ints' member array</summary>
-			public int nInts { get { return nBytes / 4; } }
-			/// <summary>Actual length of the 'longs' member array</summary>
-			public int nLongs { get { return nBytes / 8; } }
-			/// <summary>Actual length of the 'floats' member array</summary>
-			public int nFloats { get { return nBytes / 4; } }
-			/// <summary>Actual length of the 'doubles' member array</summary>
-			public int nDoubles { get { return doubles.Length; } }
-
-			/// <summary>Initialize array to hold the requested number of bytes</summary>
-			/// <param name="reqBytes">Minimum byte count of array</param>
-			/// <remarks>
-			/// Since all arrays will have the same apparent count, allocation
-			/// is done on the array with the largest data type.  This helps
-			/// to prevent out-of-bounds reads and writes by methods that do
-			/// not know about the union.
-			/// </remarks>
-			public ArrayUnion(int reqBytes)
-			{
-				// Calculate smallest number of doubles required to store the 
-				// requested byte count
-				int reqDoubles = (reqBytes + 7) / 8;
-
-				this.doubles = new double[reqDoubles];
-				this.nBytes = reqDoubles * 8;
-			}
-
-			private ArrayUnion()
-			{
-				throw new Exception("Default constructor cannot be called for ArrayUnion");
-			}
-		};
-
-		#region Properties
-		// LAME library context 
-		private LibMp3Lame _lame;
-
-		// Format of input wave data
-		private readonly WaveFormat inputFormat;
-		
-		// Output stream to write encoded data to
-		private Stream outStream;
-
-		// Flag to control whether we should dispose of output stream 
-		private bool disposeOutput = false;
-		#endregion
-
-		#region Structors
-		/// <summary>Create MP3FileWriter to write to a file on disk</summary>
-		/// <param name="outFileName">Name of file to create</param>
-		/// <param name="format">Input WaveFormat</param>
-		/// <param name="quality">LAME quality preset</param>
-		/// <param name="id3">Optional ID3 data block</param>
-		public LameMP3FileWriter(string outFileName, WaveFormat format, NAudio.Lame.LAMEPreset quality, ID3TagData id3 = null)
-			: this(File.Create(outFileName), format, quality, id3)
-		{
-			this.disposeOutput = true;
-		}
-		
-		/// <summary>Create MP3FileWriter to write to supplied stream</summary>
-		/// <param name="outStream">Stream to write encoded data to</param>
-		/// <param name="format">Input WaveFormat</param>
-		/// <param name="quality">LAME quality preset</param>
-		/// <param name="id3">Optional ID3 data block</param>
-		public LameMP3FileWriter(Stream outStream, WaveFormat format, NAudio.Lame.LAMEPreset quality, ID3TagData id3 = null)
-			: base()
-		{
-			Loader.Init();
-			//if (!Loader.Initialized)
-			//	Loader.Initialized = false;
-
-			// sanity check
-			if (outStream == null)
-				throw new ArgumentNullException("outStream");
-			if (format == null)
-				throw new ArgumentNullException("format");
-
-			// check for unsupported wave formats
-			if (format.Channels != 1 && format.Channels != 2)
-				throw new ArgumentException(string.Format("Unsupported number of channels {0}", format.Channels), "format");
-			if (format.Encoding != WaveFormatEncoding.Pcm && format.Encoding != WaveFormatEncoding.IeeeFloat)
-				throw new ArgumentException(string.Format("Unsupported encoding format {0}", format.Encoding.ToString()), "format");
-			if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample != 16)
-				throw new ArgumentException(string.Format("Unsupported PCM sample size {0}", format.BitsPerSample), "format");
-			if (format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample != 32)
-				throw new ArgumentException(string.Format("Unsupported Float sample size {0}", format.BitsPerSample), "format");
-			if (format.SampleRate < 8000 || format.SampleRate > 48000)
-				throw new ArgumentException(string.Format("Unsupported Sample Rate {0}", format.SampleRate), "format");
-
-			// select encoder function that matches data format
-			if (format.Encoding == WaveFormatEncoding.Pcm)
-			{
-				if (format.Channels == 1)
-					_encode = encode_pcm_16_mono;
-				else
-					_encode = encode_pcm_16_stereo;
-			}
-			else
-			{
-				if (format.Channels == 1)
-					_encode = encode_float_mono;
-				else
-					_encode = encode_float_stereo;
-			}
-
-			// Set base properties
-			this.inputFormat = format;
-			this.outStream = outStream;
-			this.disposeOutput = false;
-
-			// Allocate buffers based on sample rate
-			this.inBuffer = new ArrayUnion(format.AverageBytesPerSecond);
-			this.outBuffer = new byte[format.SampleRate * 5 / 4 + 7200];
-
-			// Initialize lame library
-			this._lame = new LibMp3Lame();
-
-			this._lame.InputSampleRate = format.SampleRate;
-			this._lame.NumChannels = format.Channels;
-
-			this._lame.SetPreset((int)quality);
-
-			if (id3 != null)
-				ApplyID3Tag(id3);
-
-			this._lame.InitParams();
-		}
-
-
-		/// <summary>Create MP3FileWriter to write to a file on disk</summary>
-		/// <param name="outFileName">Name of file to create</param>
-		/// <param name="format">Input WaveFormat</param>
-		/// <param name="bitRate">Output bit rate in kbps</param>
-		/// <param name="id3">Optional ID3 data block</param>
-		public LameMP3FileWriter(string outFileName, WaveFormat format, int bitRate, ID3TagData id3 = null)
-			: this(File.Create(outFileName), format, bitRate, id3)
-		{
-			this.disposeOutput = true;
-		}
-
-		/// <summary>Create MP3FileWriter to write to supplied stream</summary>
-		/// <param name="outStream">Stream to write encoded data to</param>
-		/// <param name="format">Input WaveFormat</param>
-		/// <param name="bitRate">Output bit rate in kbps</param>
-		/// <param name="id3">Optional ID3 data block</param>
-		public LameMP3FileWriter(Stream outStream, WaveFormat format, int bitRate, ID3TagData id3 = null)
-			: base()
-		{
-			Loader.Init();
-			//if (!Loader.Initialized)
-			//	Loader.Initialized = false;
-
-			// sanity check
-			if (outStream == null)
-				throw new ArgumentNullException("outStream");
-			if (format == null)
-				throw new ArgumentNullException("format");
-
-			// check for unsupported wave formats
-			if (format.Channels != 1 && format.Channels != 2)
-				throw new ArgumentException(string.Format("Unsupported number of channels {0}", format.Channels), "format");
-			if (format.Encoding != WaveFormatEncoding.Pcm && format.Encoding != WaveFormatEncoding.IeeeFloat)
-				throw new ArgumentException(string.Format("Unsupported encoding format {0}", format.Encoding.ToString()), "format");
-			if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample != 16)
-				throw new ArgumentException(string.Format("Unsupported PCM sample size {0}", format.BitsPerSample), "format");
-			if (format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample != 32)
-				throw new ArgumentException(string.Format("Unsupported Float sample size {0}", format.BitsPerSample), "format");
-			if (format.SampleRate < 8000 || format.SampleRate > 48000)
-				throw new ArgumentException(string.Format("Unsupported Sample Rate {0}", format.SampleRate), "format");
-
-			// select encoder function that matches data format
-			if (format.Encoding == WaveFormatEncoding.Pcm)
-			{
-				if (format.Channels == 1)
-					_encode = encode_pcm_16_mono;
-				else
-					_encode = encode_pcm_16_stereo;
-			}
-			else
-			{
-				if (format.Channels == 1)
-					_encode = encode_float_mono;
-				else
-					_encode = encode_float_stereo;
-			}
-
-			// Set base properties
-			this.inputFormat = format;
-			this.outStream = outStream;
-			this.disposeOutput = false;
-
-			// Allocate buffers based on sample rate
-			this.inBuffer = new ArrayUnion(format.AverageBytesPerSecond);
-			this.outBuffer = new byte[format.SampleRate * 5 / 4 + 7200];
-
-			// Initialize lame library
-			this._lame = new LibMp3Lame();
-
-			this._lame.InputSampleRate = format.SampleRate;
-			this._lame.NumChannels = format.Channels;
-
-			this._lame.BitRate = bitRate;
-
-			if (id3 != null)
-				ApplyID3Tag(id3);
-
-			this._lame.InitParams();
-		}
-
-
-		// Close LAME instance and output stream on dispose
-		/// <summary>Dispose of object</summary>
-		/// <param name="final">True if called from destructor, false otherwise</param>
-		protected override void Dispose(bool final)
-		{
-			if (_lame != null && outStream != null)
-				Flush();
-
-			if (_lame != null)
-			{
-				_lame.Dispose();
-				_lame = null;
-			}
-
-			if (outStream != null && disposeOutput)
-			{
-				outStream.Dispose();
-				outStream = null;
-			}
-
-			base.Dispose(final);
-		}
-		#endregion
-
-		/// <summary>Get internal LAME library instance</summary>
-		/// <returns>LAME library instance</returns>
-		public LibMp3Lame GetLameInstance()
-		{
-			return _lame;
-		}
-
-		#region Internal encoder operations
-		// Input buffer
-		private ArrayUnion inBuffer = null;
-
-		/// <summary>Current write position in input buffer</summary>
-		private int inPosition;
-
-		/// <summary>Output buffer, size determined by call to Lame.beInitStream</summary>
-		protected byte[] outBuffer;
-
-		long _inputByteCount = 0;
-		long _outputByteCount = 0;
-
-		// encoder write functions, one for each supported input wave format
-		
-		private int encode_pcm_16_mono()
-		{
-			return _lame.Write(inBuffer.shorts, inPosition / 2, outBuffer, outBuffer.Length, true);
-		}
-
-		private int encode_pcm_16_stereo()
-		{
-			return _lame.Write(inBuffer.shorts, inPosition / 2, outBuffer, outBuffer.Length, false);
-		}
-
-		private int encode_float_mono()
-		{
-			return _lame.Write(inBuffer.floats, inPosition / 4, outBuffer, outBuffer.Length, true);
-		}
-
-		private int encode_float_stereo()
-		{
-			return _lame.Write(inBuffer.floats, inPosition / 4, outBuffer, outBuffer.Length, false);
-		}
-
-		// Selected encoding write function
-		delegate int delEncode();
-		delEncode _encode = null;
-
-		// Pass data to encoder
-		private void Encode()
-		{
-			// check if encoder closed
-			if (outStream == null || _lame == null)
-				throw new InvalidOperationException("Output Stream closed.");
-
-			// If no data to encode, do nothing
-			if (inPosition < inputFormat.Channels * 2)
-				return;
-
-			// send to encoder
-			int rc = _encode();
-
-			if (rc > 0)
-			{
-				outStream.Write(outBuffer, 0, rc);
-				_outputByteCount += rc;
-			}
-
-			_inputByteCount += inPosition;
-			inPosition = 0;
-
-			// report progress
-			RaiseProgress(false);
-		}
-		#endregion
-
-		#region Stream implementation
-		/// <summary>Write-only stream.  Always false.</summary>
-		public override bool CanRead { get { return false; } }
-		/// <summary>Non-seekable stream.  Always false.</summary>
-		public override bool CanSeek { get { return false; } }
-		/// <summary>True when encoder can accept more data</summary>
-		public override bool CanWrite { get { return outStream != null && _lame != null; } }
-
-		/// <summary>Dummy Position.  Always 0.</summary>
-		public override long Position
-		{
-			get { return 0; }
-			set { throw new NotImplementedException(); }
-		}
-
-		/// <summary>Dummy Length.  Always 0.</summary>
-		public override long Length
-		{
-			get { return 0; }
-		}
-
-		/// <summary>Add data to output buffer, sending to encoder when buffer full</summary>
-		/// <param name="buffer">Source buffer</param>
-		/// <param name="offset">Offset of data in buffer</param>
-		/// <param name="count">Length of data</param>
-		public override void Write(byte[] buffer, int offset, int count)
-		{
-			while (count > 0)
-			{
-				int blockSize = Math.Min(inBuffer.nBytes - inPosition, count);
-				Buffer.BlockCopy(buffer, offset, inBuffer.bytes, inPosition, blockSize);
-				
-				inPosition += blockSize;
-				count -= blockSize;
-				offset += blockSize;
-
-				if (inPosition >= inBuffer.nBytes)
-					Encode();
-			}
-		}
-
-		/// <summary>Finalise compression, add final output to output stream and close encoder</summary>
-		public override void Flush()
-		{
-			// write remaining data
-			if (inPosition > 0)
-				Encode();
-
-			// finalize compression
-			int rc = _lame.Flush(outBuffer, outBuffer.Length);
-			if (rc > 0)
-			{
-				outStream.Write(outBuffer, 0, rc);
-				_outputByteCount += rc;
-			}
-
-			// report progress
-			RaiseProgress(true);
-
-			// Cannot continue after flush, so clear output stream
-			if (disposeOutput)
-				outStream.Dispose();
-			outStream = null;
-		}
-
-		/// <summary>Reading not supported.  Throws NotImplementedException.</summary>
-		/// <param name="buffer"></param>
-		/// <param name="offset"></param>
-		/// <param name="count"></param>
-		/// <returns></returns>
-		public override int Read(byte[] buffer, int offset, int count)
-		{
-			throw new NotImplementedException();
-		}
-
-		/// <summary>Setting length not supported.  Throws NotImplementedException.</summary>
-		/// <param name="value">Length value</param>
-		public override void SetLength(long value)
-		{
-			throw new NotImplementedException();
-		}
-
-		/// <summary>Seeking not supported.  Throws NotImplementedException.</summary>
-		/// <param name="offset">Seek offset</param>
-		/// <param name="origin">Seek origin</param>
-		public override long Seek(long offset, SeekOrigin origin)
-		{
-			throw new NotImplementedException();
-		}
-		#endregion
-
-		#region ID3 support
-		private void ApplyID3Tag(ID3TagData tag)
-		{
-			if (tag == null)
-				return;
-
-			if (!string.IsNullOrEmpty(tag.Title))
-				_lame.ID3SetTitle(tag.Title);
-			if (!string.IsNullOrEmpty(tag.Artist))
-				_lame.ID3SetArtist(tag.Artist);
-			if (!string.IsNullOrEmpty(tag.Album))
-				_lame.ID3SetAlbum(tag.Album);
-			if (!string.IsNullOrEmpty(tag.Year))
-				_lame.ID3SetYear(tag.Year);
-			if (!string.IsNullOrEmpty(tag.Comment))
-				_lame.ID3SetComment(tag.Comment);
-			if (!string.IsNullOrEmpty(tag.Genre))
-				_lame.ID3SetGenre(tag.Genre);
-			if (!string.IsNullOrEmpty(tag.Track))
-				_lame.ID3SetTrack(tag.Track);
+    /// <summary>LAME encoding presets</summary>
+    public enum LamePreset : int
+    {
+        /*values from 8 to 320 should be reserved for abr bitrates*/
+        /*for abr I'd suggest to directly use the targeted bitrate as a value*/
+
+        /// <summary>8-kbit ABR</summary>
+        ABR_8 = 8,
+
+        /// <summary>16-kbit ABR</summary>
+        ABR_16 = 16,
+
+        /// <summary>32-kbit ABR</summary>
+        ABR_32 = 32,
+
+        /// <summary>48-kbit ABR</summary>
+        ABR_48 = 48,
+
+        /// <summary>64-kbit ABR</summary>
+        ABR_64 = 64,
+
+        /// <summary>96-kbit ABR</summary>
+        ABR_96 = 96,
+
+        /// <summary>128-kbit ABR</summary>
+        ABR_128 = 128,
+
+        /// <summary>160-kbit ABR</summary>
+        ABR_160 = 160,
+
+        /// <summary>256-kbit ABR</summary>
+        ABR_256 = 256,
+
+        /// <summary>320-kbit ABR</summary>
+        ABR_320 = 320,
+
+        /*Vx to match Lame and VBR_xx to match FhG*/
+
+        /// <summary>VBR Quality 9</summary>
+        V9 = 410,
+
+        /// <summary>FhG: VBR Q10</summary>
+        VBR_10 = 410,
+
+        /// <summary>VBR Quality 8</summary>
+        V8 = 420,
+
+        /// <summary>FhG: VBR Q20</summary>
+        VBR_20 = 420,
+
+        /// <summary>VBR Quality 7</summary>
+        V7 = 430,
+
+        /// <summary>FhG: VBR Q30</summary>
+        VBR_30 = 430,
+
+        /// <summary>VBR Quality 6</summary>
+        V6 = 440,
+
+        /// <summary>FhG: VBR Q40</summary>
+        VBR_40 = 440,
+
+        /// <summary>VBR Quality 5</summary>
+        V5 = 450,
+
+        /// <summary>FhG: VBR Q50</summary>
+        VBR_50 = 450,
+
+        /// <summary>VBR Quality 4</summary>
+        V4 = 460,
+
+        /// <summary>FhG: VBR Q60</summary>
+        VBR_60 = 460,
+
+        /// <summary>VBR Quality 3</summary>
+        V3 = 470,
+
+        /// <summary>FhG: VBR Q70</summary>
+        VBR_70 = 470,
+
+        /// <summary>VBR Quality 2</summary>
+        V2 = 480,
+
+        /// <summary>FhG: VBR Q80</summary>
+        VBR_80 = 480,
+
+        /// <summary>VBR Quality 1</summary>
+        V1 = 490,
+
+        /// <summary>FhG: VBR Q90</summary>
+        VBR_90 = 490,
+
+        /// <summary>VBR Quality 0</summary>
+        V0 = 500,
+
+        /// <summary>FhG: VBR Q100</summary>
+        VBR_100 = 500,
+
+        /*still there for compatibility*/
+
+        /// <summary>R3Mix quality - </summary>
+        R3MIX = 1000,
+
+        /// <summary>Standard Quality</summary>
+        STANDARD = 1001,
+
+        /// <summary>Extreme Quality</summary>
+        EXTREME = 1002,
+
+        /// <summary>Insane Quality</summary>
+        INSANE = 1003,
+
+        /// <summary>Fast Standard Quality</summary>
+        STANDARD_FAST = 1004,
+
+        /// <summary>Fast Extreme Quality</summary>
+        EXTREME_FAST = 1005,
+
+        /// <summary>Medium Quality</summary>
+        MEDIUM = 1006,
+
+        /// <summary>Fast Medium Quality</summary>
+        MEDIUM_FAST = 1007
+    }
+
+    /// <summary>Delegate for receiving output messages</summary>
+    /// <param name="text">Text to output</param>
+    /// <remarks>Output from the LAME library is very limited.  At this stage only a few direct calls will result in output. No output is normally generated during encoding.</remarks>
+    public delegate void OutputHandler(string text);
+
+    /// <summary>Delegate for progress feedback from encoder</summary>
+    /// <param name="writer"><see cref="LameMp3FileWriter"/> instance that the progress update is for</param>
+    /// <param name="inputBytes">Total number of bytes passed to encoder</param>
+    /// <param name="outputBytes">Total number of bytes written to output</param>
+    /// <param name="finished">True if encoding process is completed</param>
+    public delegate void ProgressHandler(object writer, long inputBytes, long outputBytes, bool finished);
+
+    /// <summary>MP3 encoding class, uses libmp3lame DLL to encode.</summary>
+    public class LameMp3FileWriter : Stream
+    {
+        /// <summary>Static initializer, ensures that the correct library is loaded</summary>
+        static LameMp3FileWriter()
+        {
+            Loader.Init();
+        }
+
+        // Ensure that the Loader is initialized correctly
+        //static bool init_loader = Loader.Initialized;
+
+        /// <summary>Union class for fast buffer conversion</summary>
+        /// <remarks>
+        /// <para>
+        /// Because of the way arrays work in .NET, all of the arrays will have the same
+        /// length value.  To prevent unaware code from trying to read/write from out of
+        /// bounds, allocation is done at the grain of the Least Common Multiple of the
+        /// sizes of the contained types.  In this case the LCM is 8 bytes - the size of
+        /// a double or a long - which simplifies allocation.
+        /// </para><para>
+        /// This means that when you ask for an array of 500 bytes you will actually get 
+        /// an array of 63 doubles - 504 bytes total.  Any code that uses the length of 
+        /// the array will see only 63 bytes, shorts, etc.
+        /// </para><para>
+        /// CodeAnalysis does not like this class, with good reason.  It should never be
+        /// exposed beyond the scope of the MP3FileWriter.
+        /// </para>
+        /// </remarks>
+        // uncomment to suppress CodeAnalysis warnings for the ArrayUnion class:
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Portability",
+            "CA1900:ValueTypeFieldsShouldBePortable",
+            Justification =
+                "This design breaks portability, but is never exposed outside the class.  Tested on x86 and x64 architectures."
+            )]
+        [StructLayout(LayoutKind.Explicit)]
+        private class ArrayUnion
+        {
+            /// <summary>Length of the byte array</summary>
+            [FieldOffset(0)] public readonly int nBytes;
+
+            /// <summary>Array of unsigned 8-bit integer values, length will be misreported</summary>
+            [FieldOffset(16)] public readonly byte[] bytes;
+
+            /// <summary>Array of signed 16-bit integer values, length will be misreported</summary>
+            [FieldOffset(16)] public readonly short[] shorts;
+
+            /// <summary>Array of signed 32-bit integer values, length will be misreported</summary>
+            [FieldOffset(16)] public readonly int[] ints;
+
+            /// <summary>Array of signed 64-bit integer values, length will be correct</summary>
+            [FieldOffset(16)] public readonly long[] longs;
+
+            /// <summary>Array of signed 32-bit floating point values, length will be misreported</summary>
+            [FieldOffset(16)] public readonly float[] floats;
+
+            /// <summary>Array of signed 64-bit floating point values, length will be correct</summary>
+            /// <remarks>This is the actual array allocated by the constructor</remarks>
+            [FieldOffset(16)] public readonly double[] doubles;
+
+            // True sizes of the various array types, calculated from number of bytes
+
+            /// <summary>Actual length of the 'shorts' member array</summary>
+            public int nShorts => nBytes/2;
+
+            /// <summary>Actual length of the 'ints' member array</summary>
+            public int nInts => nBytes/4;
+
+            /// <summary>Actual length of the 'longs' member array</summary>
+            public int nLongs => nBytes/8;
+
+            /// <summary>Actual length of the 'floats' member array</summary>
+            public int nFloats => nBytes/4;
+
+            /// <summary>Actual length of the 'doubles' member array</summary>
+            public int nDoubles => doubles.Length;
+
+            /// <summary>Initialize array to hold the requested number of bytes</summary>
+            /// <param name="reqBytes">Minimum byte count of array</param>
+            /// <remarks>
+            /// Since all arrays will have the same apparent count, allocation
+            /// is done on the array with the largest data type.  This helps
+            /// to prevent out-of-bounds reads and writes by methods that do
+            /// not know about the union.
+            /// </remarks>
+            public ArrayUnion(int reqBytes)
+            {
+                // Calculate smallest number of doubles required to store the 
+                // requested byte count
+                var reqDoubles = (reqBytes + 7)/8;
+
+                doubles = new double[reqDoubles];
+                nBytes = reqDoubles*8;
+            }
+
+            private ArrayUnion()
+            {
+                throw new Exception("Default constructor cannot be called for ArrayUnion");
+            }
+        };
+
+        #region Properties
+
+        // LAME library context 
+        private LibMp3Lame _lame;
+
+        // Format of input wave data
+        private readonly WaveFormat inputFormat;
+
+        // Output stream to write encoded data to
+        private Stream outStream;
+
+        // Flag to control whether we should dispose of output stream 
+        private bool disposeOutput = false;
+
+        #endregion
+
+        #region Structors
+
+        /// <summary>Create MP3FileWriter to write to a file on disk</summary>
+        /// <param name="outFileName">Name of file to create</param>
+        /// <param name="format">Input WaveFormat</param>
+        /// <param name="quality">LAME quality preset</param>
+        /// <param name="id3">Optional ID3 data block</param>
+        public LameMp3FileWriter(string outFileName, WaveFormat format, LamePreset quality, Id3TagData id3 = null)
+            : this(File.Create(outFileName), format, quality, id3)
+        {
+            disposeOutput = true;
+        }
+
+        /// <summary>Create MP3FileWriter to write to supplied stream</summary>
+        /// <param name="outStream">Stream to write encoded data to</param>
+        /// <param name="format">Input WaveFormat</param>
+        /// <param name="quality">LAME quality preset</param>
+        /// <param name="id3">Optional ID3 data block</param>
+        public LameMp3FileWriter(Stream outStream, WaveFormat format, LamePreset quality, Id3TagData id3 = null)
+            : base()
+        {
+            Loader.Init();
+            //if (!Loader.Initialized)
+            //	Loader.Initialized = false;
+
+            // sanity check
+            if (outStream == null)
+                throw new ArgumentNullException(nameof(outStream));
+            if (format == null)
+                throw new ArgumentNullException(nameof(format));
+
+            // check for unsupported wave formats
+            if (format.Channels != 1 && format.Channels != 2)
+                throw new ArgumentException($"Unsupported number of channels {format.Channels}", nameof(format));
+            if (format.Encoding != WaveFormatEncoding.Pcm && format.Encoding != WaveFormatEncoding.IeeeFloat)
+                throw new ArgumentException($"Unsupported encoding format {format.Encoding}", nameof(format));
+            if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample != 16)
+                throw new ArgumentException($"Unsupported PCM sample size {format.BitsPerSample}", nameof(format));
+            if (format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample != 32)
+                throw new ArgumentException($"Unsupported Float sample size {format.BitsPerSample}", nameof(format));
+            if (format.SampleRate < 8000 || format.SampleRate > 48000)
+                throw new ArgumentException($"Unsupported Sample Rate {format.SampleRate}", nameof(format));
+
+            // select encoder function that matches data format
+            if (format.Encoding == WaveFormatEncoding.Pcm)
+            {
+                if (format.Channels == 1)
+                    _encode = encode_pcm_16_mono;
+                else
+                    _encode = encode_pcm_16_stereo;
+            }
+            else
+            {
+                if (format.Channels == 1)
+                    _encode = encode_float_mono;
+                else
+                    _encode = encode_float_stereo;
+            }
+
+            // Set base properties
+            inputFormat = format;
+            this.outStream = outStream;
+            disposeOutput = false;
+
+            // Allocate buffers based on sample rate
+            inBuffer = new ArrayUnion(format.AverageBytesPerSecond);
+            outBuffer = new byte[format.SampleRate*5/4 + 7200];
+
+            // Initialize lame library
+            _lame = new LibMp3Lame
+            {
+                InputSampleRate = format.SampleRate,
+                NumChannels = format.Channels
+            };
+
+            _lame.SetPreset((int) quality);
+
+            if (id3 != null)
+                ApplyID3Tag(id3);
+
+            _lame.InitParams();
+        }
+
+
+        /// <summary>Create MP3FileWriter to write to a file on disk</summary>
+        /// <param name="outFileName">Name of file to create</param>
+        /// <param name="format">Input WaveFormat</param>
+        /// <param name="bitRate">Output bit rate in kbps</param>
+        /// <param name="id3">Optional ID3 data block</param>
+        public LameMp3FileWriter(string outFileName, WaveFormat format, int bitRate, Id3TagData id3 = null)
+            : this(File.Create(outFileName), format, bitRate, id3)
+        {
+            disposeOutput = true;
+        }
+
+        /// <summary>Create MP3FileWriter to write to supplied stream</summary>
+        /// <param name="outStream">Stream to write encoded data to</param>
+        /// <param name="format">Input WaveFormat</param>
+        /// <param name="bitRate">Output bit rate in kbps</param>
+        /// <param name="id3">Optional ID3 data block</param>
+        public LameMp3FileWriter(Stream outStream, WaveFormat format, int bitRate, Id3TagData id3 = null)
+            : base()
+        {
+            Loader.Init();
+            //if (!Loader.Initialized)
+            //	Loader.Initialized = false;
+
+            // sanity check
+            if (outStream == null)
+                throw new ArgumentNullException(nameof(outStream));
+            if (format == null)
+                throw new ArgumentNullException(nameof(format));
+
+            // check for unsupported wave formats
+            if (format.Channels != 1 && format.Channels != 2)
+                throw new ArgumentException($"Unsupported number of channels {format.Channels}", nameof(format));
+            if (format.Encoding != WaveFormatEncoding.Pcm && format.Encoding != WaveFormatEncoding.IeeeFloat)
+                throw new ArgumentException($"Unsupported encoding format {format.Encoding}", nameof(format));
+            if (format.Encoding == WaveFormatEncoding.Pcm && format.BitsPerSample != 16)
+                throw new ArgumentException($"Unsupported PCM sample size {format.BitsPerSample}", nameof(format));
+            if (format.Encoding == WaveFormatEncoding.IeeeFloat && format.BitsPerSample != 32)
+                throw new ArgumentException($"Unsupported Float sample size {format.BitsPerSample}", nameof(format));
+            if (format.SampleRate < 8000 || format.SampleRate > 48000)
+                throw new ArgumentException($"Unsupported Sample Rate {format.SampleRate}", nameof(format));
+
+            // select encoder function that matches data format
+            if (format.Encoding == WaveFormatEncoding.Pcm)
+            {
+                if (format.Channels == 1)
+                    _encode = encode_pcm_16_mono;
+                else
+                    _encode = encode_pcm_16_stereo;
+            }
+            else
+            {
+                if (format.Channels == 1)
+                    _encode = encode_float_mono;
+                else
+                    _encode = encode_float_stereo;
+            }
+
+            // Set base properties
+            inputFormat = format;
+            this.outStream = outStream;
+            disposeOutput = false;
+
+            // Allocate buffers based on sample rate
+            inBuffer = new ArrayUnion(format.AverageBytesPerSecond);
+            outBuffer = new byte[format.SampleRate*5/4 + 7200];
+
+            // Initialize lame library
+            _lame = new LibMp3Lame
+            {
+                InputSampleRate = format.SampleRate,
+                NumChannels = format.Channels,
+                BitRate = bitRate
+            };
+
+            if (id3 != null)
+                ApplyID3Tag(id3);
+
+            _lame.InitParams();
+        }
+
+
+        // Close LAME instance and output stream on dispose
+        /// <summary>Dispose of object</summary>
+        /// <param name="final">True if called from destructor, false otherwise</param>
+        protected override void Dispose(bool final)
+        {
+            if (_lame != null && outStream != null)
+                Flush();
+
+            if (_lame != null)
+            {
+                _lame.Dispose();
+                _lame = null;
+            }
+
+            if (outStream != null && disposeOutput)
+            {
+                outStream.Dispose();
+                outStream = null;
+            }
+
+            base.Dispose(final);
+        }
+
+        #endregion
+
+        /// <summary>Get internal LAME library instance</summary>
+        /// <returns>LAME library instance</returns>
+        public LibMp3Lame GetLameInstance()
+        {
+            return _lame;
+        }
+
+        #region Internal encoder operations
+
+        // Input buffer
+        private ArrayUnion inBuffer = null;
+
+        /// <summary>Current write position in input buffer</summary>
+        private int inPosition;
+
+        /// <summary>Output buffer, size determined by call to Lame.beInitStream</summary>
+        protected byte[] outBuffer;
+
+        long _inputByteCount = 0;
+        long _outputByteCount = 0;
+
+        // encoder write functions, one for each supported input wave format
+
+        private int encode_pcm_16_mono()
+        {
+            return _lame.Write(inBuffer.shorts, inPosition/2, outBuffer, outBuffer.Length, true);
+        }
+
+        private int encode_pcm_16_stereo()
+        {
+            return _lame.Write(inBuffer.shorts, inPosition/2, outBuffer, outBuffer.Length, false);
+        }
+
+        private int encode_float_mono()
+        {
+            return _lame.Write(inBuffer.floats, inPosition/4, outBuffer, outBuffer.Length, true);
+        }
+
+        private int encode_float_stereo()
+        {
+            return _lame.Write(inBuffer.floats, inPosition/4, outBuffer, outBuffer.Length, false);
+        }
+
+        // Selected encoding write function
+        delegate int delEncode();
+
+        delEncode _encode = null;
+
+        // Pass data to encoder
+        private void Encode()
+        {
+            // check if encoder closed
+            if (outStream == null || _lame == null)
+                throw new InvalidOperationException("Output Stream closed.");
+
+            // If no data to encode, do nothing
+            if (inPosition < inputFormat.Channels*2)
+                return;
+
+            // send to encoder
+            var rc = _encode();
+
+            if (rc > 0)
+            {
+                outStream.Write(outBuffer, 0, rc);
+                _outputByteCount += rc;
+            }
+
+            _inputByteCount += inPosition;
+            inPosition = 0;
+
+            // report progress
+            RaiseProgress(false);
+        }
+
+        #endregion
+
+        #region Stream implementation
+
+        /// <summary>Write-only stream.  Always false.</summary>
+        public override bool CanRead => false;
+
+        /// <summary>Non-seekable stream.  Always false.</summary>
+        public override bool CanSeek => false;
+
+        /// <summary>True when encoder can accept more data</summary>
+        public override bool CanWrite => outStream != null && _lame != null;
+
+        /// <summary>Dummy Position.  Always 0.</summary>
+        public override long Position
+        {
+            get { return 0; }
+            set { throw new NotImplementedException(); }
+        }
+
+        /// <summary>Dummy Length.  Always 0.</summary>
+        public override long Length => 0;
+
+        /// <summary>Add data to output buffer, sending to encoder when buffer full</summary>
+        /// <param name="buffer">Source buffer</param>
+        /// <param name="offset">Offset of data in buffer</param>
+        /// <param name="count">Length of data</param>
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            while (count > 0)
+            {
+                var blockSize = Math.Min(inBuffer.nBytes - inPosition, count);
+                Buffer.BlockCopy(buffer, offset, inBuffer.bytes, inPosition, blockSize);
+
+                inPosition += blockSize;
+                count -= blockSize;
+                offset += blockSize;
+
+                if (inPosition >= inBuffer.nBytes)
+                    Encode();
+            }
+        }
+
+        /// <summary>Finalise compression, add final output to output stream and close encoder</summary>
+        public override void Flush()
+        {
+            // write remaining data
+            if (inPosition > 0)
+                Encode();
+
+            // finalize compression
+            var rc = _lame.Flush(outBuffer, outBuffer.Length);
+            if (rc > 0)
+            {
+                outStream.Write(outBuffer, 0, rc);
+                _outputByteCount += rc;
+            }
+
+            // report progress
+            RaiseProgress(true);
+
+            // Cannot continue after flush, so clear output stream
+            if (disposeOutput)
+                outStream.Dispose();
+            outStream = null;
+        }
+
+        /// <summary>Reading not supported.  Throws NotImplementedException.</summary>
+        /// <param name="buffer"></param>
+        /// <param name="offset"></param>
+        /// <param name="count"></param>
+        /// <returns></returns>
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            throw new NotImplementedException();
+        }
+
+        /// <summary>Setting length not supported.  Throws NotImplementedException.</summary>
+        /// <param name="value">Length value</param>
+        public override void SetLength(long value)
+        {
+            throw new NotImplementedException();
+        }
+
+        /// <summary>Seeking not supported.  Throws NotImplementedException.</summary>
+        /// <param name="offset">Seek offset</param>
+        /// <param name="origin">Seek origin</param>
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            throw new NotImplementedException();
+        }
+
+        #endregion
+
+        #region ID3 support
+
+        private void ApplyID3Tag(Id3TagData tag)
+        {
+            if (tag == null)
+                return;
+
+            if (!string.IsNullOrEmpty(tag.Title))
+                _lame.ID3SetTitle(tag.Title);
+            if (!string.IsNullOrEmpty(tag.Artist))
+                _lame.ID3SetArtist(tag.Artist);
+            if (!string.IsNullOrEmpty(tag.Album))
+                _lame.ID3SetAlbum(tag.Album);
+            if (!string.IsNullOrEmpty(tag.Year))
+                _lame.ID3SetYear(tag.Year);
+            if (!string.IsNullOrEmpty(tag.Comment))
+                _lame.ID3SetComment(tag.Comment);
+            if (!string.IsNullOrEmpty(tag.Genre))
+                _lame.ID3SetGenre(tag.Genre);
+            if (!string.IsNullOrEmpty(tag.Track))
+                _lame.ID3SetTrack(tag.Track);
 
             if (!string.IsNullOrEmpty(tag.Subtitle))
-                _lame.ID3SetFieldValue(string.Format("TIT3={0}", tag.Subtitle));
+                _lame.ID3SetFieldValue($"TIT3={tag.Subtitle}");
 
             if (!string.IsNullOrEmpty(tag.AlbumArtist))
-                _lame.ID3SetFieldValue(string.Format("TPE2={0}", tag.AlbumArtist));
+                _lame.ID3SetFieldValue($"TPE2={tag.AlbumArtist}");
 
 
             if (tag.AlbumArt != null && tag.AlbumArt.Length > 0 && tag.AlbumArt.Length < 131072)
-				_lame.ID3SetAlbumArt(tag.AlbumArt);
-		}
+                _lame.ID3SetAlbumArt(tag.AlbumArt);
+        }
 
-		private static Dictionary<int, string> _genres;
-		/// <summary>Dictionary of Genres supported by LAME's ID3 tag support</summary>
-		public static Dictionary<int, string> Genres
-		{
-			get
-			{
-				if (_genres == null)
-					_genres = LibMp3Lame.ID3GenreList();
-				return _genres;
-			}
-		}
-		#endregion
+        private static Dictionary<int, string> _genres;
 
-		#region LAME library print hooks
-		/// <summary>Set output function for Error output</summary>
-		/// <param name="fn">Function to call for Error output</param>
-		public void SetErrorFunction(OutputHandler fn)
-		{
-			GetLameInstance().SetErrorFunc(t => fn(t));
-		}
+        /// <summary>Dictionary of Genres supported by LAME's ID3 tag support</summary>
+        public static Dictionary<int, string> Genres
+        {
+            get
+            {
+                if (_genres == null)
+                    _genres = LibMp3Lame.ID3GenreList();
+                return _genres;
+            }
+        }
 
-		/// <summary>Set output function for Debug output</summary>
-		/// <param name="fn">Function to call for Debug output</param>
-		public void SetDebugFunction(OutputHandler fn)
-		{
-			GetLameInstance().SetMsgFunc(t => fn(t));
-		}
+        #endregion
 
-		/// <summary>Set output function for Message output</summary>
-		/// <param name="fn">Function to call for Message output</param>
-		public void SetMessageFunction(OutputHandler fn)
-		{
-			GetLameInstance().SetMsgFunc(t => fn(t));
-		}
+        #region LAME library print hooks
 
-		/// <summary>Get configuration of LAME context, results passed to Message function</summary>
-		public void PrintLAMEConfig()
-		{
-			GetLameInstance().PrintConfig();
-		}
+        /// <summary>Set output function for Error output</summary>
+        /// <param name="fn">Function to call for Error output</param>
+        public void SetErrorFunction(OutputHandler fn)
+        {
+            GetLameInstance().SetErrorFunc(t => fn(t));
+        }
 
-		/// <summary>Get internal settings of LAME context, results passed to Message function</summary>
-		public void PrintLAMEInternals()
-		{
-			GetLameInstance().PrintInternals();
-		}
-		#endregion
+        /// <summary>Set output function for Debug output</summary>
+        /// <param name="fn">Function to call for Debug output</param>
+        public void SetDebugFunction(OutputHandler fn)
+        {
+            GetLameInstance().SetMsgFunc(t => fn(t));
+        }
 
-		#region Progress event
-		int _minProgressTime = 100;
-		/// <summary>Minimimum time between progress events in ms, or 0 for no limit</summary>
-		/// <remarks>Defaults to 100ms</remarks>
-		public int MinProgressTime
-		{
-			get { return _minProgressTime; }
-			set
-			{
-				_minProgressTime = Math.Max(0, value);
-			}
-		}
+        /// <summary>Set output function for Message output</summary>
+        /// <param name="fn">Function to call for Message output</param>
+        public void SetMessageFunction(OutputHandler fn)
+        {
+            GetLameInstance().SetMsgFunc(t => fn(t));
+        }
 
-		/// <summary>Called when data is written to the output file from Encode or Flush</summary>
-		public event ProgressHandler OnProgress;
+        /// <summary>Get configuration of LAME context, results passed to Message function</summary>
+        public void PrintLAMEConfig()
+        {
+            GetLameInstance().PrintConfig();
+        }
 
-		DateTime _lastProgress = DateTime.Now;
-		/// <summary>Call any registered OnProgress handlers</summary>
-		/// <param name="finished">True if called at end of output</param>
-		protected void RaiseProgress(bool finished)
-		{
-			var timeDelta = DateTime.Now - _lastProgress;
-			if (finished || timeDelta.TotalMilliseconds >= _minProgressTime)
-			{
-				_lastProgress = DateTime.Now;
-				var prog = OnProgress;
-				if (prog != null)
-					prog(this, _inputByteCount, _outputByteCount, finished);
-			}
-		}
-		#endregion
-	}
+        /// <summary>Get internal settings of LAME context, results passed to Message function</summary>
+        public void PrintLAMEInternals()
+        {
+            GetLameInstance().PrintInternals();
+        }
+
+        #endregion
+
+        #region Progress event
+
+        int _minProgressTime = 100;
+
+        /// <summary>Minimimum time between progress events in ms, or 0 for no limit</summary>
+        /// <remarks>Defaults to 100ms</remarks>
+        public int MinProgressTime
+        {
+            get { return _minProgressTime; }
+            set { _minProgressTime = Math.Max(0, value); }
+        }
+
+        /// <summary>Called when data is written to the output file from Encode or Flush</summary>
+        public event ProgressHandler OnProgress;
+
+        DateTime _lastProgress = DateTime.Now;
+
+        /// <summary>Call any registered OnProgress handlers</summary>
+        /// <param name="finished">True if called at end of output</param>
+        protected void RaiseProgress(bool finished)
+        {
+            var timeDelta = DateTime.Now - _lastProgress;
+            if (finished || timeDelta.TotalMilliseconds >= _minProgressTime)
+            {
+                _lastProgress = DateTime.Now;
+                var prog = OnProgress;
+                prog?.Invoke(this, _inputByteCount, _outputByteCount, finished);
+            }
+        }
+
+        #endregion
+    }
 }

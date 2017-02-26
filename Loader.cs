@@ -24,70 +24,66 @@
 // 
 #endregion
 using System;
+using System.Linq;
 using System.Reflection;
 using System.Security;
 
 namespace NAudio.Lame
 {
-	internal static class Loader
-	{
-		internal static bool Initialized = false;
-		internal static string LoadedName;
+    internal static class Loader
+    {
+        private static bool _initialized;
+        private static string _loadedName;
 
-		private static Assembly LoadLameWrapper(object sender, ResolveEventArgs args)
-		{
-			//Console.WriteLine("LoadLameWrapper(): {0}", args.Name);
+        public static void Init()
+        {
+            if (_initialized) return;
 
-			var asmName = new AssemblyName(args.Name).Name + ".dll";
-			var srcAssembly = typeof(LameMP3FileWriter).Assembly;
+            // Register assembly resolver
+            AppDomain.CurrentDomain.AssemblyResolve += (sender, args) =>
+            {
+                //Console.WriteLine("LoadLameWrapper(): {0}", args.Name);
 
-			// Search resources for requested assembly
-			byte[] src = null;
-			foreach (string nxt in srcAssembly.GetManifestResourceNames())
-			{
-				int p1 = nxt.IndexOf(Environment.Is64BitProcess ? "x64" : "x86");
-				int p2 = nxt.IndexOf(asmName);
+                var asmName = new AssemblyName(args.Name).Name + ".dll";
+                var srcAssembly = typeof (LameMp3FileWriter).Assembly;
 
-				if (p1 < 0 || p2 < 0 || p1 >= p2)
-					continue;
+                // Search resources for requested assembly
+                byte[] src = null;
+                foreach (var nxt in from nxt in srcAssembly.GetManifestResourceNames()
+                    let p1 = nxt.IndexOf(Environment.Is64BitProcess ? "x64" : "x86")
+                    let p2 = nxt.IndexOf(asmName)
+                    where p1 >= 0 && p2 >= 0 && p1 < p2
+                    select nxt)
+                {
+                    _loadedName = nxt;
 
-				LoadedName = nxt;
-				
-				// Load resource into byte array
-				using (var strm = srcAssembly.GetManifestResourceStream(nxt))
-				{
-					src = new byte[strm.Length];
-					strm.Read(src, 0, (int)strm.Length);
-					break;
-				}
-			}
-			if (src == null)
-				return null;
+                    // Load resource into byte array
+                    using (var strm = srcAssembly.GetManifestResourceStream(nxt))
+                    {
+                        src = new byte[strm.Length];
+                        strm.Read(src, 0, (int) strm.Length);
+                        break;
+                    }
+                }
+                if (src == null)
+                    return null;
 
-			// Load assembly from byte array
-			//Console.WriteLine("Loaded {0} bytes from resource", src.Length);
-			try
-			{
-				var res = Assembly.Load(src, null, SecurityContextSource.CurrentAppDomain);
-				return res;
-			}
-			catch //(Exception e)
-			{
-				//Console.WriteLine("LoadLameWrapper: Failed to create assembly from buffer.");
-				//Console.WriteLine("Exception:");
-				//Console.WriteLine("{0}", e.Message);
-				throw;
-			}
-		}
-
-		public static void Init()
-		{
-			if (!Initialized)
-			{
-				// Register assembly resolver
-				AppDomain.CurrentDomain.AssemblyResolve += LoadLameWrapper;
-				Initialized = true;
-			}
-		}
-	}
+                // Load assembly from byte array
+                //Console.WriteLine("Loaded {0} bytes from resource", src.Length);
+                try
+                {
+                    var res = Assembly.Load(src, null, SecurityContextSource.CurrentAppDomain);
+                    return res;
+                }
+                catch //(Exception e)
+                {
+                    //Console.WriteLine("LoadLameWrapper: Failed to create assembly from buffer.");
+                    //Console.WriteLine("Exception:");
+                    //Console.WriteLine("{0}", e.Message);
+                    throw;
+                }
+            };
+            _initialized = true;
+        }
+    }
 }
