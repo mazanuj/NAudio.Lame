@@ -26,7 +26,6 @@
 using System;
 using System.Linq;
 using System.Reflection;
-using System.Security;
 
 namespace NAudio.Lame
 {
@@ -50,7 +49,7 @@ namespace NAudio.Lame
                 // Search resources for requested assembly
                 byte[] src = null;
                 foreach (var nxt in from nxt in srcAssembly.GetManifestResourceNames()
-                    let p1 = nxt.IndexOf(Environment.Is64BitProcess ? "x64" : "x86")
+                    let p1 = nxt.IndexOf(Misc.Is64BitOs() ? "x64" : "x86")
                     let p2 = nxt.IndexOf(asmName)
                     where p1 >= 0 && p2 >= 0 && p1 < p2
                     select nxt)
@@ -72,7 +71,7 @@ namespace NAudio.Lame
                 //Console.WriteLine("Loaded {0} bytes from resource", src.Length);
                 try
                 {
-                    var res = Assembly.Load(src, null, SecurityContextSource.CurrentAppDomain);
+                    var res = Assembly.Load(src, null);
                     return res;
                 }
                 catch //(Exception e)

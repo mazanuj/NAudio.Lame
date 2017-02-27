@@ -10,7 +10,7 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>NAudio.Lame</RootNamespace>
     <AssemblyName>NAudio.Lame</AssemblyName>
-    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <TargetFrameworkProfile />
   </PropertyGroup>
@@ -40,7 +40,6 @@
   <ItemGroup>
     <Reference Include="LameDLLWrap">
       <HintPath>LameDLLWrap\bin\x64\Release\LameDLLWrap.dll</HintPath>
-      <Private>False</Private>
     </Reference>
     <Reference Include="NAudio, Version=1.8.0.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>packages\NAudio.1.8.0\lib\net35\NAudio.dll</HintPath>
@@ -54,6 +53,7 @@
     <Compile Include="ID3TagData.cs" />
     <Compile Include="LameDLL.cs" />
     <Compile Include="Loader.cs" />
+    <Compile Include="Misc.cs" />
     <Compile Include="MP3FileWriter.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
